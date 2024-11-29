@@ -1,0 +1,18 @@
+2024.11.21
+了解了muduo网络库并安装
+
+2024.11.22
+了解了protobuff和Zookeeper并安装，了解了分布式，rpc，编译，链接，可执行文件一些概念
+
+2024.11.23
+了解了项目中muduo和protobuff和Zookeeper 三者的作用，怎么组织起来的，项目如何运作的
+了解到要学会编写.proto文件和实现自己的Zookeeper接口api，
+
+收集了很多博客，都非常有用，希望以后复习的时候能认真阅读“林林林ZEYU”的完整的项目实现过程记录博客
+
+正式进入项目阶段
+了解了项目架构，代码部署
+CMakeLists.txt的配置编写
+
+2024.11.29
+学习protobuf的 Message 和 Service 编写，protobuf底层rpc方法实现，类，继承，虚函数，抽象类，重写
