@@ -1,5 +1,17 @@
 mprpc项目正式学习
 
+
+
+这个框架就是负责
+
+**1.网络通信**
+
+**2.请求和响应的序列化和反序列化**
+
+**3.服务发现、负载均衡、高可用等分布式系统的关键功能**
+
+
+
  Git 只跟踪文件，不跟踪空文件夹,你创建空文件夹的时候并不会上传，在空文件夹里放一个.gitkeep文件即可，文件名就叫这个也行
 
 ![image-20241129111928656](mprpc项目正式学习.assets/image-20241129111928656.png)
@@ -17,6 +29,120 @@ mprpc项目正式学习
 <img src="mprpc项目正式学习.assets/image-20241129221641994.png" alt="image-20241129221641994" style="zoom:67%;" />
 
 <img src="mprpc项目正式学习.assets/image-20241129221718102.png" alt="image-20241129221718102" style="zoom:67%;" />
+
+底层框架如何处理 RPC 请求
+
+- 客户端通过 RPC 调用发送请求到服务端。
+- 服务端接收到请求后，会根据请求的类型找到对应的服务方法（如 `Login`）。
+- 框架将请求数据反序列化为 `LoginRequest` 对象，服务端的业务逻辑方法（如 `Login`）会通过这个对象获取用户名和密码并处理业务。
+- 服务端处理完业务后，将结果填入 `LoginResponse` 中，框架会将该响应对象序列化并发送回客户端。
+- `done->Run()`：通知框架回调，执行响应的序列化和传输操作。
+
+# 详细流程
+
+<img src="mprpc项目正式学习.assets/image-20241130220050763.png" alt="image-20241130220050763" style="zoom:67%;" />
+
+在引入 **Zookeeper** 后的 **RPC框架** 详细流程可以分为 **服务注册、服务发现、请求处理和响应** 四大部分。下面是每个部分的详细流程总结：
+
+------
+
+### 1. **服务端：服务注册（注册到 Zookeeper）**
+
+服务端提供了 RPC 服务，首先需要将自己的服务注册到 **Zookeeper**，使得客户端能够发现并调用该服务。
+
+#### 步骤：
+
+1. **启动服务端**：
+   - 服务端启动时，首先会调用框架的注册功能，向 **Zookeeper** 注册自己所提供的 RPC 服务。服务提供者通常会创建一个独立的 Zookeeper 节点路径，例如 `/rpc/services/UserService`。
+2. **注册服务实例**：
+   - 服务实例将自己的信息（例如：服务地址、端口等元数据）存储在 Zookeeper 中。例如，每个服务实例会在 `/rpc/services/UserService/instance_1`、`/rpc/services/UserService/instance_2` 等节点下存储自己的地址（如 `127.0.0.1:8080`）。
+3. **维护服务实例状态**：
+   - 服务端将注册的服务信息**持久化**到 Zookeeper。如果服务端挂掉或者下线，Zookeeper 会自动删除该服务节点（**临时节点**），并更新注册表。
+4. **提供服务接口**：
+   - 服务端继承框架的 `UserServiceRpc` 类，并实现其具体方法（如 `Login` 和 `GetFriendLists` 等）。这些方法被框架自动暴露并等待客户端请求。
+
+------
+
+### 2. **客户端：服务发现（通过 Zookeeper 获取服务）**
+
+客户端需要获取远程服务实例的地址，以便发起 RPC 请求。
+
+#### 步骤：
+
+1. 启动客户：
+   - 客户端启动时，首先需要查询 Zookeeper，获取指定服务的实例列表。例如，查询 `/rpc/services/UserService` 节点下的所有实例。
+2. 获取服务列表：
+   - Zookeeper 会返回该服务下所有注册的实例节点，如 `instance_1`、`instance_2` 等。这些实例节点包含服务实例的地址（如 `127.0.0.1:8080`）。
+3. 负载均衡：
+   - 客户端会根据负载均衡策略（如轮询、随机、加权等）从多个服务实例中选择一个实例。这样可以确保请求均衡地分配给多个服务端，提高系统的可扩展性和性能。
+4. 建立与服务端的连接：
+   - 客户端选择服务实例后，通过框架与选定的服务端建立网络连接，准备发送 RPC 请求。
+
+------
+
+### 3. **客户端发起 RPC 请求**
+
+客户端通过代理类（如 `UserService_Stub`）发起 RPC 请求，并将请求数据发送到服务端。
+
+#### 步骤：
+
+1. 调用代理类方法
+   - 客户端通过代理类（`UserService_Stub`）发起远程方法调用，例如 `Login(name, pwd)`。这些方法会被框架拦截并转换为网络请求。
+2. 请求序列化
+   - 代理类将请求参数（如 `LoginRequest`）转换为字节流。框架使用 **Protobuf** 进行序列化，将数据转化为可以通过网络传输的格式。
+3. 发送请求
+   - 请求数据通过底层网络库（如 **Muduo**）发送到服务端。框架会确保请求经过网络层正确传输。
+
+------
+
+### 4. **服务端：处理请求**
+
+服务端接收到请求后，框架会将请求反序列化为对应的消息对象，并调用服务提供者的本地方法来处理请求。
+
+#### 步骤：
+
+1. 接收请求
+   - 服务端收到请求后，框架会将传输过来的字节流反序列化为 Protobuf 生成的请求对象（如 `LoginRequest`）。此时，服务端可以通过对象方法获取请求参数（如用户名、密码等）。
+2. 调用本地服务方法
+   - 框架将反序列化后的请求对象传递给服务端的本地方法（如 `Login(name, pwd)`）。本地服务方法处理业务逻辑后返回结果。
+3. 封装响应
+   - 服务端将处理结果封装到响应对象（如 `LoginResponse`）中。响应对象会包括业务处理结果（如登录成功或失败的状态）以及其他信息（如错误码、错误信息等）。
+4. 响应序列化
+   - 响应对象通过框架进行序列化，转化为字节流以便发送回客户端。
+5. 发送响应
+   - 底层网络库（如 **Muduo**）将响应数据通过网络发送回客户端。
+
+------
+
+### 5. **客户端：接收响应并处理**
+
+客户端接收到服务端的响应后，框架会将响应数据反序列化为 Protobuf 生成的响应对象，并返回给客户端应用。
+
+#### 步骤：
+
+1. 接收响应
+   - 客户端通过框架接收到来自服务端的响应字节流。
+2. 反序列化响应
+   - 框架使用 Protobuf 将响应字节流反序列化为响应对象（如 `LoginResponse`）。客户端可以通过对象方法获取响应数据。
+3. 处理响应数据
+   - 客户端应用根据响应数据进行处理，例如检查登录是否成功、获取错误信息等。
+
+------
+
+### 6. **服务端下线与健康检查（高可用性）**
+
+在分布式环境中，服务端可能会宕机或发生故障，框架和 Zookeeper 会确保系统的高可用性。
+
+#### 步骤：
+
+1. **健康检查**：
+   - 客户端会定期检查 Zookeeper 上的服务实例列表。通过 Zookeeper 提供的 **Watcher** 机制，客户端会在服务下线时收到通知。
+2. **服务下线通知**：
+   - 如果服务实例不可用，Zookeeper 会自动从服务实例列表中删除该服务。客户端会自动绕过不可用的实例，确保请求可以发往健康实例。
+3. **服务重试机制**：
+   - 如果某个服务实例不可用，客户端会根据负载均衡策略重新选择其他可用的实例，确保请求能够正确执行。
+
+
 
 # 学习项目的顺序–也是视频讲解的顺序
 
@@ -141,6 +267,8 @@ target_link_libraries(consumer mprpc protobuf)
 
 
 # 5.protobuff实践
+
+https://blog.csdn.net/LINZEYU666/article/details/119205758
 
 xml,json也学习一下，很简单
 
@@ -513,21 +641,170 @@ UserService_Stub构造函数用于初始化与服务端的连接，它接收一�
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
 # 6.本地服务发布成rpc服务
 
+https://blog.csdn.net/LINZEYU666/article/details/119237242
+
+在 RPC **服务端**实现一个本地服务，并通过重写生成的 RPC 服务接口来处理**客户端**的请求。
+
+通过 Protobuf 自动生成的 `LoginRequest` 和 `LoginResponse` 类，开发者可以方便地处理 RPC 调用中的数据传输与序列化。框架会自动处理网络通信和序列化，开发者只需要实现具体的业务逻辑即可。
+
+### 总结
+
+1. **定义服务**：在 Protobuf 文件中定义 `service` 和 `message`。
+2. **实现服务端**：实现继承自 Protobuf 自动生成的服务类，处理实际的业务逻辑。
+3. **配置网络**：使用 Muduo 来创建服务器和客户端，处理网络通信。
+4. **客户端调用**：客户端通过生成的 `Stub` 类来调用服务端的远程方法。
+
+1.在这个 `.proto` 文件中，我们定义了 一个rpc方法（比如`Login` ，客户端会发送一个 `LoginRequest` 消息，服务端会返回一个 `LoginResponse` 消息。）
+
+2.使用 Protobuf 编译器（`protoc`）来生成 C++ 代码。这些代码包括消息类（如 `LoginRequest`、`LoginResponse`）和服务类（如 `UserServiceRpc`）。
+
+3.实现服务端。服务端需要继承 Protobuf 生成的抽象服务类，重写其中的 RPC 方法。
+
+4.实现服务端。使用 Muduo 来监听服务端的网络请求
+
+5.实现客户端，我们会使用 `UserServiceRpc::Stub` 来发送请求。`Stub` 是由 Protobuf 自动生成的类，用来在客户端和服务端之间做数据传输和方法调用。
+
+```C++
+#include <iostream>
+#include <string>
+#include "user.pb.h"
+
+/*
+UserService原来是一个本地服务，提供了两个进程内的本地方法，Login和GetFriendLists
+*/
+class UserService : public fixbug::UserServiceRpc//这个UserService是使用在rpc服务的发布端（rpc服务提供者）
+{
+public:
+    bool Login(std::string name, std::string pwd)
+    {
+        std::cout << "doing local service: Login" << std::endl;
+        std::cout << "name:" << name << " pwd:" << pwd << std::endl;  
+        return false;
+    }
+
+    bool Register(uint32_t id, std::string name, std::string pwd)
+    {
+        std::cout << "doing local service: Register" << std::endl;
+        std::cout << "id:" << id << "name:" << name << " pwd:" << pwd << std::endl;
+        return true;
+    }
+
+	/*我的角色是服务的提供者，你作为远端想发起一个调用我这个机器上的UserService的Login方法
+	首先你会发一个RPC请求，这个请求是先到RPC框架，RPC框架根据你发过来的请求，然后根据参数和标识
+	匹配到我的Login方法，然后它就把这个网络上发的请求上报来，我接收到这个请求后，从请求中拿取数据，
+	然后做本地业务，填写相应的响应，然后再执行一个回调，相当于把执行完的这个RPC方法的返回值再塞给框架
+	，然后框架再进行序列化，通过网络传送回去，发送给你。体现在Login的四个参数。
+	*/
+
+	/*
+    重写基类UserServiceRpc的虚函数 下面这些方法都是框架直接调用的
+    1. caller RPC调用者   ===>   Login(LoginRequest)打包  => muduo库 =>   callee端
+    2. callee RPC提供者   ===>   根据接收到的Login(LoginRequest)  => 交到下面重写的这个Login方法上了
+    */
+    void Login(::google::protobuf::RpcController* controller,
+                       const ::fixbug::LoginRequest* request,
+                       ::fixbug::LoginResponse* response,
+                       ::google::protobuf::Closure* done)
+    {
+        //框架给业务上报了请求参数LoginRequest，应用程序获取相应数据做本地业务（登录的本地业务）
+        std::string name = request->name();
+        std::string pwd = request->pwd();
+		/*这个就是使用protobuf的好处，protobuf直接把字节流反序列化成我们可以识别的LoginRequest对象，通过
+		他生成的方法获取姓名和密码。
+		*/
+
+        //做本地业务
+        bool login_result = Login(name, pwd);//等于当前的本地方法
+
+        //框架只是创建一个LoginResponse，我们只需要把响应写入，包括错误码、错误消息、返回值
+        fixbug::ResultCode *code = response->mutable_result();
+        code->set_errcode(0);
+        code->set_errmsg("");//没有错误
+        response->set_sucess(login_result);
+
+        //执行回调操作，执行响应对象数据的序列化和网络发送（都是由框架来完成的）
+		//Closure是一个抽象类，重写Run,让它去做一些事情
+        done->Run();
+    }
+};
+
+```
+
+
+
+这段代码展示了如何在 RPC 服务端实现一个本地服务，并通过重写生成的 RPC 服务接口来处理客户端的请求。通过 Protobuf 自动生成的 `LoginRequest` 和 `LoginResponse` 类，开发者可以方便地处理 RPC 调用中的数据传输与序列化。框架会自动处理网络通信和序列化，开发者只需要实现具体的业务逻辑即可。
+
+### 1. `UserService` 类
+
+`UserService` 是服务提供者（即服务器端），它继承自 `fixbug::UserServiceRpc`，这个类是从 Protobuf 定义的 `service` 自动生成的。`UserService` 类提供了本地服务方法 `Login` 和 `Register`。
+
+- ```
+  Login(std::string name, std::string pwd)
+  ```
+
+  ：这是一个本地方法，模拟用户登录的业务逻辑，接受用户名和密码，输出相关信息，并返回 `false` 表示登录失败。
+
+- ```
+  Register(uint32_t id, std::string name, std::string pwd)
+  ```
+
+  ：这是一个本地方法，模拟用户注册，接受用户 ID、用户名和密码，输出相关信息，并返回 `true` 表示注册成功。
+
+### 2. `Login` RPC 方法实现
+
+这是关键的部分，重写了基类 `UserServiceRpc` 中的 `Login` 方法，实现了如何处理来自客户端的 RPC 请求。
+
+```cpp
+void Login(::google::protobuf::RpcController* controller,
+           const ::fixbug::LoginRequest* request,
+           ::fixbug::LoginResponse* response,
+           ::google::protobuf::Closure* done)
+{
+    // 从接收到的 LoginRequest 中获取用户的用户名和密码
+    std::string name = request->name();
+    std::string pwd = request->pwd();
+
+    // 调用本地的 Login 方法进行业务逻辑处理
+    bool login_result = Login(name, pwd);  // 调用本地的 Login 方法
+
+    // 填写响应 LoginResponse
+    fixbug::ResultCode *code = response->mutable_result();
+    code->set_errcode(0);  // 设置错误码，0表示无错误
+    code->set_errmsg("");  // 设置错误消息
+    response->set_sucess(login_result);  // 设置登录成功与否
+
+    // 执行回调，告知框架已完成响应的处理
+    done->Run();
+}
+```
+
+### 3. 参数和数据传输
+
+- `RpcController* controller`：用于控制 RPC 调用的一些细节（如超时、取消等）。
+- `const ::fixbug::LoginRequest* request`：RPC 调用的请求数据，包含客户端发送的参数（如用户名和密码）。这个 `LoginRequest` 对象由 Protobuf 序列化成字节流并反序列化为此对象。
+- `::fixbug::LoginResponse* response`：RPC 调用的响应数据，框架会将此对象序列化并发送回客户端。你需要填充该响应对象，以便传递给客户端。
+- `::google::protobuf::Closure* done`：一个回调对象，用于通知框架当业务处理完成时进行响应的序列化和发送。
+
+### 4. 底层框架如何处理 RPC 请求
+
+- 客户端通过 RPC 调用发送请求到服务端。
+- 服务端接收到请求后，会根据请求的类型找到对应的服务方法（如 `Login`）。
+- 框架将请求数据反序列化为 `LoginRequest` 对象，服务端的业务逻辑方法（如 `Login`）会通过这个对象获取用户名和密码并处理业务。
+- 服务端处理完业务后，将结果填入 `LoginResponse` 中，框架会将该响应对象序列化并发送回客户端。
+- `done->Run()`：通知框架回调，执行响应的序列化和传输操作。
+
+### 5. 使用 Protobuf 的优势
+
+- 使用 Protobuf 使得数据的序列化和反序列化非常简便。Protobuf 会自动为 `LoginRequest` 和 `LoginResponse` 生成方法，开发者只需要专注于业务逻辑。
+- `LoginRequest` 对象通过 Protobuf 自动生成的接口将字节流反序列化为可以访问的结构体，简化了开发工作。
+
+
+
 # 7.Mprpc框架基础类设计
+
+
 
 # 8.Mprpc框架项目动态库编译
 
