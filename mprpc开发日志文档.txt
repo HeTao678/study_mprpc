@@ -15,4 +15,60 @@
 CMakeLists.txt的配置编写
 
 2024.11.29
-学习protobuf的 Message 和 Service 编写，protobuf底层rpc方法实现，类，继承，虚函数，抽象类，重写
+protobuf定义消息类型和服务
+学习protobuf的 Message 和 Service 编写，protobuf底层rpc方法实现，.proto文件编译生成两个.cc文件，里面有类，然后在源代码里去使用它们，继承，虚函数，抽象类，重写
+
+
+2024.11.30
+具体的rpc方法实现，在.proto文件编译生成两个.cc文件的基类rpc方法基础上,本地方法重写了基类 UserServiceRpc 中的 方法
+
+2024.12.01
+发布rpc方法就是，使用rpc框架来将本地方法暴露出去，发布出去，使得网络上其他节点的进程也能使用自己单机上的服务
+这个框架就是要初始化类：`MprpcApplication` 类通过 `Init` 方法来完成框架需要加载配置文件、日志、网络等设置
+服务发布类：`RpcProvider` 类负责将本地服务（如 `UserService`）注册到 RPC 框架中，并启动服务器监听客户端请求。
+
+这个项目就是主要写，这两个类
+
+2024.12.02
+基础类分文件编写
+mprpcapplication.h和mprpcprovider.h    mprpcprovider.cc和mprpcapplication.cc，这2个头文件写到userservice.cc
+Mprpc框架项目动态库编译  编写多个CMakeLists.txt  进入build 目录下， 命令行输入命令   cmake  ..     make
+
+在mprpcapplication.cc理实现这个框架类初始化init方法（完成框架初始化，解析命令行参数，加载配置文件，设置 RPC 服务的相关参数。）
+
+
+加载配置文件类MprpcConfig  方法LoadConfigFile 函数 ,读取文件，按行读取，去除空字符操作，截取有用信息操作
+
+bulid目录下  cmake .. make  构建可执行程序  ，改动了源码，要清空build目录 rm -r *，重新cmake .. make
+
+
+2024.12.03 provider 的run方法 ，然后CMakeLists编译的时候出了一些报错，都通过GPT完美解决了
+
+2024.12.04 粗略的过了一遍，梳理了一下 Provider 所有的5个类 ，了解了服务端是怎么使用他注册服务对象，发布服务方法的，然后具体怎么实现的还没看
+
+2024.12.06  Provider的Run方法，使用muduo网络库来启动TCP连接和线程池
+
+
+2024.12.11 Provider的NotifyService方法，给rpc服务提供方callee使用来发布服务，框架要做的事（也就是这个NotifyService方法）是维护一张哈希表，记录1.服务名和2.服务信息结构体  ， 这个服务信息结构体又是记录了1.服务对象指针和2.一张哈希表记录他对应的1.方法名和2.方法指针
+服务名是string类型，因为rpc请求方只知道服务名字，而不是指针，具体底层的事框架在做
+
+2024.12.12 Provider的OnMessage方法  接收消息，解析消息，注意消息格式是怎样的，从消息的服务名，方法名，查双重哈希表，根据查到的method生成请求request和响应response参数，把消息的参数信息反序列化到request, 指针done绑定一个Closure的回调函数，用这几个参数method、request、response、done调用服务对象的CallMethod方法：service->CallMethod(method, nullptr, request, response, done); // 做完本地业务，根据结果写好reponse给框架，框架再给调用方
+
+
+2024.12.14-17 客户端 怎么使用rpc框架，原理就是要重写个CallMethod方法，1.构造rpc请求（三部分组成，其中两部分要序列化） 2.建立tcp连接 3.发送rpc请求 4.接收响应 5.反序列化相应  6.关闭连接  
+
+2024.12.18  了解框架客户端服务端怎么使用 
+
+2024.12.19 实现了userservice的注册register方法和另一个模块friend的getfriendlist方法，了解rpccontrol的怎么使用，他是继承抽象基类，重写其中的方法来的，明天具体把他用到服务端和客户端的callmethod
+
+2024.12.20 实现了mprpccontroller.h /.cc  在框架的callmethod中添加了 ，然后caller使用的时候定义一个controler来使用
+了解日志系统，异步，使用互斥访问的队列来存储消息，使用了模板，来存储不同类型的数据
+
+2024.12.22 编写日志系统，解耦框架，避免直接进行磁盘文件IO，框架的多个线程互斥同步先写到缓冲队列，确保线程安全，然后集中让一个后台线程写到.txt文件里里面涉及到宏定义，书写，字符串拼接，写文件，缓冲队列， 完善到provider中
+
+2024.12.23-12.25 zookeeper安装和学习.
+
+2024.12.30-2024.12.31  zookeeper运用，封装接口类zkClient，分别用在客户端和服务端。编译构建项目，调试，成功运行，至此项目结束 
+
+
+
